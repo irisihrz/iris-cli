@@ -18,6 +18,103 @@ NC='\033[0m'
 USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 BASE_URL="https://www.neko-sama.to"
 
+check_permissions() {
+    if [ "$EUID" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            error "sudo n'est pas installé. Veuillez l'installer manuellement."
+            return 1
+        fi
+        
+        if ! sudo -n true 2>/dev/null; then
+            info "Ce script nécessite des privilèges root pour installer les dépendances."
+            info "Veuillez entrer votre mot de passe sudo si demandé."
+        fi
+    fi
+    return 0
+}
+
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$NAME
+    elif [ -f /etc/redhat-release ]; then
+        OS="Fedora"
+    elif [ -f /etc/arch-release ]; then
+        OS="Arch Linux"
+    elif [ "$(uname)" == "Darwin" ]; then
+        OS="macOS"
+    elif [ "$(uname)" == "MINGW"* ] || [ "$(uname)" == "MSYS"* ]; then
+        OS="Windows"
+    else
+        OS="Unknown"
+    fi
+    echo "$OS"
+}
+
+install_dependencies() {
+    local os=$(detect_os)
+    local missing_deps=()
+    local python_deps=("youtube-dl")
+    local system_deps=("curl" "grep" "sed" "awk" "mpv")
+    
+    info "Détection du système d'exploitation..."
+    info "Système détecté: $os"
+    
+    for dep in "${system_deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        info "Installation des dépendances système manquantes..."
+        
+        case "$os" in
+            "Fedora")
+                if ! command -v sudo >/dev/null 2>&1; then
+                    error "sudo n'est pas installé. Veuillez l'installer manuellement."
+                    return 1
+                fi
+                sudo dnf install -y "${missing_deps[@]}"
+                ;;
+            "Arch Linux")
+                if ! command -v sudo >/dev/null 2>&1; then
+                    error "sudo n'est pas installé. Veuillez l'installer manuellement."
+                    return 1
+                fi
+                sudo pacman -S --noconfirm "${missing_deps[@]}"
+                ;;
+            "Windows")
+                for dep in "${missing_deps[@]}"; do
+                    if [ "$dep" = "mpv" ]; then
+                        info "Veuillez installer MPV manuellement depuis https://mpv.io/installation/"
+                    else
+                        pip install "$dep"
+                    fi
+                done
+                ;;
+            *)
+                error "Système d'exploitation non supporté: $os"
+                return 1
+                ;;
+        esac
+    fi
+    
+    for dep in "${python_deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            info "Installation de $dep..."
+            pip install "$dep"
+        fi
+    done
+    
+    if [ $? -eq 0 ]; then
+        success "Toutes les dépendances sont maintenant installées."
+    else
+        error "Une erreur est survenue lors de l'installation des dépendances."
+        return 1
+    fi
+}
+
 debug_log() {
     if [ "$DEBUG" = true ]; then
         echo -e "${DIM}[DEBUG] $1${NC}" >&2
@@ -128,19 +225,22 @@ check_dependencies() {
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
         echo
-        center_text "${RED}❌ Dépendances manquantes détectées:${NC}"
-        for dep in "${missing_deps[@]}"; do
-            center_text "${YELLOW}• $(printf "%-${max_width}s" "$dep")${NC}"
-        done
-        echo
-        center_text "${YELLOW}Pour installer les dépendances manquantes, exécutez:${NC}"
-        center_text "${CYAN}sudo apt install ${missing_deps[*]}${NC}"
-        center_text "${YELLOW}Note: youtube-dl peut nécessiter une installation séparée via pip:${NC}"
-        center_text "${CYAN}pip install youtube-dl${NC}"
-        exit 1
+        center_text "${YELLOW}Dépendances manquantes détectées. Tentative d'installation automatique...${NC}"
+        
+        if install_dependencies; then
+            success "Installation des dépendances réussie!"
+        else
+            error "Échec de l'installation automatique des dépendances."
+            echo
+            center_text "${YELLOW}Veuillez installer manuellement les dépendances manquantes:${NC}"
+            for dep in "${missing_deps[@]}"; do
+                center_text "${CYAN}• $(printf "%-${max_width}s" "$dep")${NC}"
+            done
+            exit 1
+        fi
+    else
+        success "Toutes les dépendances sont correctement installées.\n"
     fi
-    
-    success "Toutes les dépendances sont correctement installées.\n"
 }
 
 url_encode() {
@@ -584,6 +684,9 @@ main() {
         shift
         DEBUG=true
         show_banner
+        if ! check_permissions; then
+            exit 1
+        fi
         check_dependencies
         if [ $# -eq 0 ]; then
             echo -e "${YELLOW}Entrez le nom de l'anime à rechercher:${NC}"
@@ -597,6 +700,9 @@ main() {
     else
         DEBUG=false
         show_banner
+        if ! check_permissions; then
+            exit 1
+        fi
         check_dependencies
         if [ $# -eq 0 ]; then
             echo -e "${YELLOW}Entrez le nom de l'anime à rechercher:${NC}"
