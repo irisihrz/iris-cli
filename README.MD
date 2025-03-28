@@ -24,22 +24,27 @@ yay -S iris-cli
 
 ### Pour Debian/Ubuntu
 ```bash
+# Créer un répertoire temporaire et se déplacer dedans
+mkdir -p ~/iris-cli
+cd ~/iris-cli
+
 # Installer les dépendances
 sudo apt update
 sudo apt install -y git curl youtube-dl mpv sed awk grep
 
 # Supprimer le dossier existant si nécessaire
-if [ -d "$HOME/iris-cli" ]; then
-    rm -rf "$HOME/iris-cli"
-fi
+rm -rf ~/iris-cli/*
 
 # Cloner le dépôt
-git clone https://github.com/irisihrz/iris-cli.git "$HOME/iris-cli"
-cd "$HOME/iris-cli"
+git clone https://github.com/irisihrz/iris-cli.git .
 
 # Installer en tant que commande système
-sudo mv iris-cli /usr/local/bin/iris-cli
+sudo cp iris-cli /usr/local/bin/iris-cli
 sudo chmod +x /usr/local/bin/iris-cli
+
+# Nettoyer
+cd ~
+rm -rf ~/iris-cli
 
 # Vérifier l'installation
 iris-cli --version
@@ -47,22 +52,27 @@ iris-cli --version
 
 ### Pour Fedora
 ```bash
+# Créer un répertoire temporaire et se déplacer dedans
+mkdir -p ~/iris-cli
+cd ~/iris-cli
+
 # Installer les dépendances
 sudo dnf update -y
 sudo dnf install -y git curl youtube-dl mpv sed awk grep
 
-# Supprimer le dossier existant si nécessaire
-if [ -d "$HOME/iris-cli" ]; then
-    rm -rf "$HOME/iris-cli"
-fi
+# Supprimer le contenu du dossier existant si nécessaire
+rm -rf ~/iris-cli/*
 
 # Cloner le dépôt
-git clone https://github.com/irisihrz/iris-cli.git "$HOME/iris-cli"
-cd "$HOME/iris-cli"
+git clone https://github.com/irisihrz/iris-cli.git .
 
 # Installer en tant que commande système
-sudo mv iris-cli /usr/local/bin/iris-cli
+sudo cp iris-cli /usr/local/bin/iris-cli
 sudo chmod +x /usr/local/bin/iris-cli
+
+# Nettoyer
+cd ~
+rm -rf ~/iris-cli
 
 # Vérifier l'installation
 iris-cli --version
