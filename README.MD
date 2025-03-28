@@ -22,15 +22,43 @@ sudo pacman -S mpv sed curl awk grep
 yay -S iris-cli
 ```
 
-### Pour Linux (autres distributions)
+### Pour Debian/Ubuntu
 ```bash
 # Installer les dépendances
 sudo apt update
 sudo apt install -y git curl youtube-dl mpv sed awk grep
 
+# Supprimer le dossier existant si nécessaire
+if [ -d "$HOME/iris-cli" ]; then
+    rm -rf "$HOME/iris-cli"
+fi
+
 # Cloner le dépôt
-git clone https://github.com/irisihrz/iris-cli.git
-cd iris-cli
+git clone https://github.com/irisihrz/iris-cli.git "$HOME/iris-cli"
+cd "$HOME/iris-cli"
+
+# Installer en tant que commande système
+sudo mv iris-cli /usr/local/bin/iris-cli
+sudo chmod +x /usr/local/bin/iris-cli
+
+# Vérifier l'installation
+iris-cli --version
+```
+
+### Pour Fedora
+```bash
+# Installer les dépendances
+sudo dnf update -y
+sudo dnf install -y git curl youtube-dl mpv sed awk grep
+
+# Supprimer le dossier existant si nécessaire
+if [ -d "$HOME/iris-cli" ]; then
+    rm -rf "$HOME/iris-cli"
+fi
+
+# Cloner le dépôt
+git clone https://github.com/irisihrz/iris-cli.git "$HOME/iris-cli"
+cd "$HOME/iris-cli"
 
 # Installer en tant que commande système
 sudo mv iris-cli /usr/local/bin/iris-cli
