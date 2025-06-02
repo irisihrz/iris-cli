@@ -1,10 +1,9 @@
 #!/bin/bash
 
-VERSION="1.1.0"
+VERSION="1.0.0"
 AUTHOR="IrisWeb"
 DEBUG=false
 
-# Couleurs et styles
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -19,43 +18,132 @@ NC='\033[0m'
 USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 BASE_URL="https://www.neko-sama.to"
 
-# Fonctions d'affichage
-
-error() {
-    printf "${RED}❌ Erreur: %s${NC}\n" "$1" >&2
+check_permissions() {
+    if [ "$EUID" -ne 0 ]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            error "sudo n'est pas installé. Veuillez l'installer manuellement."
+            return 1
+        fi
+        
+        if ! sudo -n true 2>/dev/null; then
+            info "Ce script nécessite des privilèges root pour installer les dépendances."
+            info "Veuillez entrer votre mot de passe sudo si demandé."
+        fi
+    fi
+    return 0
 }
 
-success() {
-    printf "${GREEN}✓ %s${NC}\n" "$1"
+detect_os() {
+    if [ -f /etc/arch-release ]; then
+        OS="Arch Linux"
+    elif [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$NAME
+    elif [ -f /etc/redhat-release ]; then
+        OS="Fedora"
+    elif [ "$(uname)" == "Darwin" ]; then
+        OS="macOS"
+    elif [ "$(uname)" == "MINGW"* ] || [ "$(uname)" == "MSYS"* ]; then
+        OS="Windows"
+    else
+        OS="Unknown"
+    fi
+    echo "$OS"
 }
 
-info() {
-    printf "${BLUE}ℹ %s${NC}\n" "$1"
-}
-
-warning() {
-    printf "${YELLOW}⚠ %s${NC}\n" "$1"
+install_dependencies() {
+    local os=$(detect_os)
+    local missing_deps=()
+    local python_deps=("youtube-dl")
+    local system_deps=("curl" "grep" "sed" "awk" "mpv")
+    
+    info "Détection du système d'exploitation..."
+    info "Système détecté: $os"
+    
+    for dep in "${system_deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        info "Installation des dépendances système manquantes..."
+        
+        case "$os" in
+            "Fedora")
+                if ! command -v sudo >/dev/null 2>&1; then
+                    error "sudo n'est pas installé. Veuillez l'installer manuellement."
+                    return 1
+                fi
+                sudo dnf install -y "${missing_deps[@]}"
+                ;;
+            "Arch Linux")
+                if ! command -v sudo >/dev/null 2>&1; then
+                    error "sudo n'est pas installé. Veuillez l'installer manuellement."
+                    return 1
+                fi
+                
+                # Vérifier si pacman est disponible
+                if ! command -v pacman >/dev/null 2>&1; then
+                    error "pacman n'est pas disponible. Vérifiez que vous êtes sur un système Arch Linux."
+                    return 1
+                fi
+                
+                # Installer les dépendances avec une vérification plus robuste
+                for dep in "${missing_deps[@]}"; do
+                    if ! sudo pacman -Q "$dep" >/dev/null 2>&1; then
+                        info "Installation de $dep..."
+                        if ! sudo pacman -S --noconfirm "$dep"; then
+                            error "Échec de l'installation de $dep"
+                            return 1
+                        fi
+                    fi
+                done
+                ;;
+            "Windows")
+                for dep in "${missing_deps[@]}"; do
+                    if [ "$dep" = "mpv" ]; then
+                        info "Veuillez installer MPV manuellement depuis https://mpv.io/installation/"
+                    else
+                        pip install "$dep"
+                    fi
+                done
+                ;;
+            *)
+                error "Système d'exploitation non supporté: $os"
+                return 1
+                ;;
+        esac
+    fi
+    
+    for dep in "${python_deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            info "Installation de $dep..."
+            pip install "$dep"
+        fi
+    done
+    
+    if [ $? -eq 0 ]; then
+        success "Toutes les dépendances sont maintenant installées."
+    else
+        error "Une erreur est survenue lors de l'installation des dépendances."
+        return 1
+    fi
 }
 
 debug_log() {
     if [ "$DEBUG" = true ]; then
-        printf "${DIM}[DEBUG] %s${NC}\n" "$1" >&2
+        echo -e "${DIM}[DEBUG] $1${NC}" >&2
     fi
 }
 
 center_text() {
     local text="$1"
-    local width
-    width=$(tput cols)
-    local clean_text
-    clean_text=$(echo -e "$text" | sed 's/\x1b\[[0-9;]*m//g')
+    local width=$(tput cols)
+    local clean_text=$(echo -e "$text" | sed 's/\\033\[[0-9;]*m//g')
     local text_length=${#clean_text}
     local padding=$(( (width - text_length) / 2 ))
-    if (( padding > 0 )); then
-        printf "%*s%s\n" "$padding" "" "$text"
-    else
-        echo -e "$text"
-    fi
+    printf "%${padding}s%s\n" "" "$(echo -e "$text")"
 }
 
 show_banner() {
@@ -67,9 +155,13 @@ show_banner() {
     center_text "██║██╔══██╗██║╚════██║ ╚════╝  ██║     ██║     ██║"
     center_text "██║██║  ██║██║███████║         ╚██████╗███████╗██║"
     center_text "╚═╝╚═╝  ╚═╝╚═╝╚══════╝          ╚═════╝╚══════╝╚═╝"
+
+
+
+
     echo -e "${NC}"
     center_text "${YELLOW}Version: ${VERSION} - Créé par ${AUTHOR}${NC}"
-    center_text "${BLUE}Un lecteur vidéo en ligne de commande pour regarder des animes en VOSTFR et VF${NC}"
+    center_text "${BLUE}Un lecteur vidéo en ligne de commande pour regarder des animes en VOSTFR et VF${NC}\n"
     center_text "${BLUE}Basé sur Ani-Cli${NC}\n"
 }
 
@@ -88,91 +180,13 @@ show_help() {
     center_text "${CYAN}./iris-cli -d \"One Piece\"      ${NC}# Lance en mode debug"
 }
 
-# Vérifie si sudo est disponible et demande les droits si nécessaire
-check_sudo() {
-    if [ "$EUID" -ne 0 ]; then
-        if ! command -v sudo >/dev/null 2>&1; then
-            error "sudo n'est pas installé. Veuillez l'installer manuellement."
-            exit 1
-        fi
-        info "Ce script nécessite les privilèges root pour installer les dépendances."
-        info "Veuillez entrer votre mot de passe sudo si demandé."
-        sudo -v || { error "Échec de l'élévation des privilèges sudo."; exit 1; }
-    fi
-}
-
-# Installation des dépendances sous Arch Linux uniquement
-install_dependencies() {
-    local missing_deps=()
-    local system_deps=(curl grep sed awk mpv)
-    local python_deps=(youtube-dl)
-    
-    info "Vérification des dépendances système..."
-    for dep in "${system_deps[@]}"; do
-        if ! command -v "$dep" >/dev/null 2>&1; then
-            missing_deps+=("$dep")
-        fi
-    done
-    
-    if [ ${#missing_deps[@]} -gt 0 ]; then
-        info "Dépendances système manquantes détectées: ${missing_deps[*]}"
-        check_sudo
-        info "Installation des dépendances manquantes via pacman..."
-        sudo pacman -Sy --needed --noconfirm "${missing_deps[@]}" || {
-            error "Échec de l'installation des dépendances système."
-            exit 1
-        }
-        success "Dépendances système installées avec succès."
-    else
-        success "Toutes les dépendances système sont installées."
-    fi
-    
-    # Installation python deps via pip si absentes
-    for pdep in "${python_deps[@]}"; do
-        if ! command -v "$pdep" >/dev/null 2>&1; then
-            info "Installation de la dépendance Python $pdep via pip..."
-            if ! pip install --user "$pdep"; then
-                error "Échec de l'installation de $pdep via pip."
-                exit 1
-            fi
-            success "$pdep installé avec succès."
-        else
-            debug_log "$pdep est déjà installé."
-        fi
-    done
-}
-
-# Encode une chaîne pour URL (simple)
-url_encode() {
-    local string="$1"
-    # Remplacement simple espaces et caractères non alphanumériques
-    echo -n "$string" | jq -sRr @uri
-}
-
-# Extraction numéro d'épisode dans un titre (ex: "Episode 12")
-extract_episode_number() {
-    local title="$1"
-    echo "$title" | grep -oP '(?<=Episode )\d+' || echo ""
-}
-
-# Tri des épisodes par numéro
-sort_episodes() {
-    local episodes="$1"
-    echo "$episodes" | while read -r line; do
-        if [ -n "$line" ]; then
-            num=$(extract_episode_number "$line")
-            printf "%04d|%s\n" "$num" "$line"
-        fi
-    done | sort -n | cut -d'|' -f2-
-}
-
-# Affichage de la barre de progression
 show_progress() {
     local current=$1
     local total=$2
     local width=50
     local progress=$((current * width / total))
     local bar=""
+    
     for ((i=0; i<width; i++)); do
         if [ $i -lt $progress ]; then
             bar+="█"
@@ -180,257 +194,543 @@ show_progress() {
             bar+="░"
         fi
     done
+    
     center_text "${YELLOW}Chargement: [${bar}] $((current * 100 / total))%${NC}"
 }
 
-# Récupération URL embed depuis page vidéo
-get_embed_url() {
-    local page_url="$1"
-    # Extraire l'ID dans URL (exemple: vid=xxx)
-    local video_id
-    video_id=$(echo "$page_url" | grep -oP '[^_/]+(?=\.html)' || echo "")
-    if [ -z "$video_id" ]; then
-        error "Impossible d'extraire l'ID vidéo depuis l'URL."
+error() {
+    center_text "${RED}❌ Erreur: $1${NC}" >&2
+}
+
+success() {
+    center_text "${GREEN}✓ $1${NC}"
+}
+
+info() {
+    center_text "${BLUE}ℹ $1${NC}"
+}
+
+warning() {
+    center_text "${YELLOW}⚠ $1${NC}"
+}
+
+check_dependencies() {
+    local dependencies=(curl grep sed awk mpv youtube-dl)
+    local missing_deps=()
+    
+    info "Vérification des dépendances requises..."
+    echo
+    center_text "${DIM}Dépendances à vérifier:${NC}"
+    
+    local max_width=0
+    for dep in "${dependencies[@]}"; do
+        local dep_width=${#dep}
+        if [ $dep_width -gt $max_width ]; then
+            max_width=$dep_width
+        fi
+    done
+    
+    for dep in "${dependencies[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            missing_deps+=("$dep")
+            center_text "${RED}✗ $(printf "%-${max_width}s" "$dep")${NC}"
+        else
+            center_text "${GREEN}✓ $(printf "%-${max_width}s" "$dep")${NC}"
+        fi
+    done
+    
+    if [ ${#missing_deps[@]} -ne 0 ]; then
+        echo
+        center_text "${YELLOW}Dépendances manquantes détectées. Tentative d'installation automatique...${NC}"
+        
+        if install_dependencies; then
+            success "Installation des dépendances réussie!"
+        else
+            error "Échec de l'installation automatique des dépendances."
+            echo
+            center_text "${YELLOW}Veuillez installer manuellement les dépendances manquantes:${NC}"
+            for dep in "${missing_deps[@]}"; do
+                center_text "${CYAN}• $(printf "%-${max_width}s" "$dep")${NC}"
+            done
+            exit 1
+        fi
+    else
+        success "Toutes les dépendances sont correctement installées.\n"
+    fi
+}
+
+url_encode() {
+    echo "$1" | sed 's/ /%20/g' | sed 's/[^a-zA-Z0-9%]/-/g' | tr '[:upper:]' '[:lower:]'
+}
+
+extract_episode_number() {
+    local title="$1"
+    echo "$title" | grep -o 'Episode [0-9]*' | grep -o '[0-9]*'
+}
+
+sort_episodes() {
+    local episodes="$1"
+    echo "$episodes" | while read -r line; do
+        if [ ! -z "$line" ]; then
+            num=$(extract_episode_number "$line")
+            printf "%04d|%s\n" "$num" "$line"
+        fi
+    done | sort -n | cut -d'|' -f2-
+}
+
+extract_page_episodes() {
+    local page_content="$1"
+    local episodes=""
+    
+    episodes=$(echo "$page_content" | grep -o '<h3[^>]*>[^<]*<a[^>]*>[^<]*Episode[^<]*</a>' | \
+              sed -E 's/.*>([^<]*Episode[^<]*)<.*/\1/')
+    
+    if [ -z "$episodes" ]; then
+        episodes=$(echo "$page_content" | grep -o '<div class="title">[^<]*Episode[^<]*</div>' | \
+                  sed -E 's/<div class="title">([^<]*)<\/div>/\1/')
+    fi
+    
+    echo "$episodes"
+}
+
+extract_page_urls() {
+    local page_content="$1"
+    local episode_title="$2"
+    
+    echo "$page_content" | grep -o "href=\"[^\"]*${episode_title}[^\"]*\"" | \
+    sed -E 's/href="([^"]*)".*/\1/' | head -n 1
+}
+
+download_uqload_video() {
+    local video_url="$1"
+    local output_file="$2"
+    local referer_url="$3"
+    
+    debug_log "URL de la vidéo: $video_url"
+    debug_log "Fichier de sortie: $output_file"
+    debug_log "Referer: $referer_url"
+    
+    info "Téléchargement de la vidéo en cours..."
+    
+    local video_domain=$(echo "$video_url" | sed -E 's|^https?://([^/]+).*|\1|')
+    debug_log "Domaine vidéo: $video_domain"
+    
+    # Téléchargement avec les bons headers
+    curl -# -L \
+        -H "User-Agent: $USER_AGENT" \
+        -H "Accept: */*" \
+        -H "Accept-Language: fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3" \
+        -H "Accept-Encoding: gzip, deflate, br" \
+        -H "Range: bytes=0-" \
+        -H "Connection: keep-alive" \
+        -H "Referer: $referer_url" \
+        -H "Origin: https://$video_domain" \
+        -H "Sec-Fetch-Dest: video" \
+        -H "Sec-Fetch-Mode: cors" \
+        -H "Sec-Fetch-Site: same-site" \
+        -H "Pragma: no-cache" \
+        -H "Cache-Control: no-cache" \
+        -H "Cookie: PHPSESSID=$(curl -s -c - "$referer_url" | grep PHPSESSID | awk '{print $7}')" \
+        --compressed \
+        -o "$output_file" \
+        "$video_url"
+        
+    # Vérification que le fichier est bien un MP4
+    if [ $? -eq 0 ] && [ -f "$output_file" ] && [ -s "$output_file" ]; then
+        local file_type=$(file "$output_file" | grep -i "mp4")
+        if [ -z "$file_type" ]; then
+            error "Le fichier téléchargé n'est pas un MP4 valide"
+            rm -f "$output_file"
+            return 1
+        fi
+        
+        success "Vidéo téléchargée avec succès!"
+        info "Démarrage de la lecture..."
+        
+        local mpv_pid
+        mpv "$output_file" --force-media-title="$(basename "$output_file")" &
+        mpv_pid=$!
+        
+        wait $mpv_pid
+        local mpv_status=$?
+        
+        if [ $mpv_status -eq 0 ] || [ $mpv_status -eq 143 ]; then
+            success "Lecture terminée avec succès!"
+            rm -f "$output_file"
+            return 0
+        else
+            error "Une erreur est survenue lors de la lecture."
+            rm -f "$output_file"
+            return 1
+        fi
+    else
+        error "Échec du téléchargement de la vidéo"
+        [ -f "$output_file" ] && rm -f "$output_file"
         return 1
     fi
+}
+
+download_sibnet_video() {
+    local video_url="$1"
+    local output_file="$2"
+    local referer_url="$3"
+    
+    debug_log "URL de la vidéo Sibnet: $video_url"
+    debug_log "Fichier de sortie: $output_file"
+    debug_log "Referer: $referer_url"
+    
+    if [ "$DEBUG" = true ]; then
+        echo -e "${BLUE}URL de la vidéo Sibnet: ${CYAN}${video_url}${NC}"
+        info "Téléchargement de la vidéo Sibnet..."
+    fi
+    
+    if ! command -v youtube-dl >/dev/null 2>&1; then
+        error "youtube-dl n'est pas installé. Veuillez l'installer pour continuer."
+        return 1
+    fi
+    
+    if [ "$DEBUG" = true ]; then
+        youtube-dl "$video_url"
+    else
+        youtube-dl --no-warnings "$video_url" | grep -E "^\[download\]" | grep -v "Destination:"
+    fi
+    
+    local downloaded_file=$(ls -t *.mp4 2>/dev/null | head -n1)
+    
+    if [ -f "$downloaded_file" ] && [ -s "$downloaded_file" ]; then
+        if [ "$DEBUG" = true ]; then
+            success "Vidéo téléchargée avec succès"
+        fi
+        info "Lecture de la vidéo..."
+        
+        # Lecture simple avec mpv
+        mpv "$downloaded_file" --force-media-title="$(basename "$downloaded_file")" --no-terminal --no-msg-color --osd-level=0
+        
+        if [ $? -eq 0 ] || [ $? -eq 143 ]; then
+            success "Lecture terminée!"
+            rm -f "$downloaded_file"
+            return 0
+        else
+            error "Erreur lors de la lecture."
+            rm -f "$downloaded_file"
+            return 1
+        fi
+    else
+        error "Erreur lors du téléchargement de la vidéo"
+        [ -f "$downloaded_file" ] && rm -f "$downloaded_file"
+        return 1
+    fi
+}
+
+get_video_url() {
+    local embed_url="$1"
+    local video_url=""
+    local iframe_url=""
+    local video_type=""
+    
+    debug_log "Début de l'extraction de l'URL de la vidéo depuis: $embed_url"
+    
+    local embed_page=$(curl -s \
+        -H "User-Agent: $USER_AGENT" \
+        -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" \
+        -H "Accept-Language: fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3" \
+        -H "Connection: keep-alive" \
+        -H "Upgrade-Insecure-Requests: 1" \
+        "$embed_url")
+    
+    debug_log "Page d'embed récupérée"
+    
+    iframe_url=$(echo "$embed_page" | grep -o '<iframe[^>]*src="[^"]*"' | grep -o 'src="[^"]*"' | sed 's/src="\([^"]*\)"/\1/')
+    
+    if [ -z "$iframe_url" ]; then
+        error "Impossible de trouver l'URL de l'iframe"
+        return 1
+    fi
+    
+    debug_log "URL de l'iframe trouvée: $iframe_url"
+
+    # Détection du type de vidéo
+    if echo "$iframe_url" | grep -q "sibnet"; then
+        video_type="sibnet"
+        video_url="$iframe_url"
+        echo "$video_url|$iframe_url|$video_type"
+        return 0
+    else
+        local iframe_content=$(curl -s -L \
+            -H "User-Agent: $USER_AGENT" \
+            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" \
+            -H "Accept-Language: fr,fr-FR;q=0.8,en-US;q=0.5,en;q=0.3" \
+            -H "Connection: keep-alive" \
+            -H "Upgrade-Insecure-Requests: 1" \
+            -H "Referer: $embed_url" \
+            -H "Origin: $(echo "$embed_url" | sed -E 's|^(https?://[^/]+).*|\1|')" \
+            "$iframe_url")
+        
+        debug_log "Contenu de l'iframe récupéré"
+
+        # Recherche de l'URL de la vidéo dans différents formats
+        video_url=$(echo "$iframe_content" | grep -o '"https://[^"]*r\.mp4"' | sed 's/"//g')
+        
+        if [ -z "$video_url" ]; then
+            video_url=$(echo "$iframe_content" | grep -o '"https://[^"]*master\.m3u8"' | sed 's/"//g')
+        fi
+        
+        if [ -z "$video_url" ]; then
+            video_url=$(echo "$iframe_content" | grep -o '"https://[^"]*\.mp4"' | sed 's/"//g')
+        fi
+        
+        if [ -z "$video_url" ]; then
+            error "Impossible d'extraire l'URL de la vidéo"
+            return 1
+        fi
+        
+        video_type="uqload"
+        echo "$video_url|$iframe_url|$video_type"
+        return 0
+    fi
+}
+
+get_embed_url() {
+    local page_url="$1"
+    local page_content=$(curl -s -A "$USER_AGENT" "$page_url")
+    local video_id=$(echo "$page_url" | grep -o '[^_]*\.html' | sed 's/\.html//')
+    
+    if [ -z "$video_id" ]; then
+        error "Impossible d'extraire l'ID de la vidéo."
+        return 1
+    fi
+    
     echo "${BASE_URL}/embed.php?vid=${video_id}"
 }
 
-# Extraction URL vidéo et type (uqload ou sibnet)
-get_video_url() {
-    local embed_url="$1"
-    debug_log "Extraction URL vidéo depuis: $embed_url"
-    
-    local embed_page
-    embed_page=$(curl -s -A "$USER_AGENT" "$embed_url") || {
-        error "Échec du téléchargement de la page d'embed."
-        return 1
-    }
-    
-    local iframe_url
-    iframe_url=$(echo "$embed_page" | grep -oP '<iframe[^>]+src="\K[^"]+') || ""
-    if [ -z "$iframe_url" ]; then
-        error "Iframe non trouvée dans la page d'embed."
-        return 1
-    fi
-    
-    # Detecter hébergeur
-    if echo "$iframe_url" | grep -q "uqload"; then
-        echo "uqload|$iframe_url"
-    elif echo "$iframe_url" | grep -q "sibnet"; then
-        echo "sibnet|$iframe_url"
-    else
-        error "Hébergeur vidéo non supporté : $iframe_url"
-        return 1
-    fi
-}
-
-# Télécharger vidéo depuis uqload
-download_uqload() {
-    local url="$1"
-    local output="$2"
-    debug_log "Téléchargement uqload: $url"
-    # Commande simulée, à adapter si tu as un vrai lien direct
-    youtube-dl -o "$output" "$url" || return 1
-}
-
-# Télécharger vidéo depuis sibnet
-download_sibnet() {
-    local url="$1"
-    local output="$2"
-    debug_log "Téléchargement sibnet: $url"
-    # Commande simulée, à adapter selon extraction réelle
-    youtube-dl -o "$output" "$url" || return 1
-}
-
-# Extraction des épisodes (titre et url)
 extract_episodes() {
     local anime_name="$1"
+    local target_episode="$2"
+    local encoded_name=$(url_encode "$anime_name")
     local page=1
-    local episodes=()
+    local all_episodes=""
+    local all_urls=""
+    local total_pages=0
     
-    local query=$(url_encode "$anime_name")
+    info "\nRecherche des épisodes pour ${BOLD}$anime_name${NC}..."
+    echo -e "${DIM}Veuillez patienter pendant la recherche...${NC}\n"
     
+    # Première passe pour compter le nombre total de pages
     while true; do
-        local url="${BASE_URL}/animes/${query}/page/${page}"
-        debug_log "Récupération de la page ${page}: $url"
+        local search_url="${BASE_URL}/search.php?keywords=${encoded_name}&page=${page}"
+        local page_content=$(curl -s -A "$USER_AGENT" "$search_url")
         
-        local page_content
-        page_content=$(curl -s -A "$USER_AGENT" "$url")
-        if [ -z "$page_content" ]; then
-            warning "Page vide ou inaccessible: $url"
+        if ! echo "$page_content" | grep -q "Episode"; then
             break
         fi
+        ((total_pages++))
         
-        # Extraire titres et liens
-        # Le pattern HTML est à ajuster selon site (exemple générique)
-        mapfile -t page_episodes < <(echo "$page_content" | grep -Po '<a href="([^"]+)"[^>]*title="([^"]+)"' | sed -E 's/^<a href="([^"]+)"[^>]*title="([^"]+)".*$/\2|\1/')
-        if [ ${#page_episodes[@]} -eq 0 ]; then
-            debug_log "Aucun épisode trouvé à la page $page."
+        if ! echo "$page_content" | grep -q "page=$(($page + 1))"; then
             break
         fi
+        ((page++))
+    done
+    
+    if [ $total_pages -eq 0 ]; then
+        error "Aucun épisode trouvé pour '$anime_name'"
+        return 1
+    fi
+    
+    info "Trouvé $total_pages page(s) de résultats"
+    
+    page=1
+    while [ $page -le $total_pages ]; do
+        local search_url="${BASE_URL}/search.php?keywords=${encoded_name}&page=${page}"
+        show_progress $page $total_pages
         
-        episodes+=("${page_episodes[@]}")
+        local page_content=$(curl -s -A "$USER_AGENT" "$search_url")
+        local page_episodes=$(extract_page_episodes "$page_content")
         
-        # Si moins de 20 épisodes sur la page, fin de la pagination (arbitraire)
-        if [ ${#page_episodes[@]} -lt 20 ]; then
-            break
+        if [ ! -z "$page_episodes" ]; then
+            if [ -z "$all_episodes" ]; then
+                all_episodes="$page_episodes"
+            else
+                all_episodes=$(echo -e "${all_episodes}\n${page_episodes}")
+            fi
         fi
         
         ((page++))
     done
+    echo -e "\n"
     
-    # Supprimer doublons et trier
-    episodes_unique=($(printf "%s\n" "${episodes[@]}" | sort -u))
-    
-    # Affichage trié
-    printf "%s\n" "${episodes_unique[@]}"
-}
-
-# Menu de sélection épisode
-select_episode() {
-    local episodes=("$@")
-    echo
-    echo -e "${BOLD}Liste des épisodes disponibles :${NC}"
-    local i=1
-    for ep in "${episodes[@]}"; do
-        local title="${ep%%|*}"
-        local url="${ep#*|}"
-        echo "[$i] $title"
-        ((i++))
-    done
-    echo
-    
-    local choice
-    while true; do
-        read -rp "Sélectionnez un épisode (1-${#episodes[@]}): " choice
-        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#episodes[@]} )); then
-            break
-        else
-            echo "Choix invalide, réessayez."
-        fi
-    done
-    
-    echo "${episodes[$((choice-1))]}"
-}
-
-# Lecture vidéo via mpv
-play_video() {
-    local video_url="$1"
-    debug_log "Lancement de la lecture vidéo avec mpv: $video_url"
-    mpv --force-window=immediate --no-terminal "$video_url"
-}
-
-# Nettoyage fichiers temporaires
-cleanup() {
-    if [ -n "$TMP_VIDEO" ] && [ -f "$TMP_VIDEO" ]; then
-        rm -f "$TMP_VIDEO"
+    if [ -z "$all_episodes" ]; then
+        error "Aucun épisode trouvé pour '$anime_name'"
+        return 1
     fi
-}
-trap cleanup EXIT
-
-# Traitement des arguments
-parse_args() {
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -h|--help)
-                show_banner
-                show_help
-                exit 0
-                ;;
-            -v|--version)
-                echo "iris-cli version $VERSION"
-                exit 0
-                ;;
-            -d|--debug)
-                DEBUG=true
-                shift
-                ;;
-            -*)
-                error "Option inconnue : $1"
-                exit 1
-                ;;
-            *)
-                # Arguments positionnels
-                POSITIONAL_ARGS+=("$1")
-                shift
-                ;;
-        esac
-    done
-    set -- "${POSITIONAL_ARGS[@]}"
-    ANIME_NAME="${POSITIONAL_ARGS[0]}"
-    EPISODE_NUM="${POSITIONAL_ARGS[1]}"
     
-    if [ -z "$ANIME_NAME" ]; then
-        error "Veuillez spécifier le nom de l'anime."
-        show_help
-        exit 1
+    all_episodes=$(sort_episodes "$all_episodes")
+    
+    if [ ! -z "$target_episode" ]; then
+        selection=$target_episode
+    else
+        center_text "${PURPLE}${BOLD}Épisodes disponibles:${NC}"
+        center_text "${DIM}----------------------------------------${NC}"
+        echo "$all_episodes" | nl -w3 -s") " | while read -r line; do
+            if [[ $line =~ ^[[:space:]]*[0-9]+\) ]]; then
+                num=${line%)*}
+                title=${line#*)}
+                center_text "${CYAN}$num)${NC}${title}"
+            fi
+        done
+        center_text "${DIM}----------------------------------------${NC}"
+        
+        echo
+        center_text "${YELLOW}Entrez le numéro de l'épisode à regarder:${NC}"
+        read -r selection
     fi
-}
-
-# --- SCRIPT PRINCIPAL ---
-
-POSITIONAL_ARGS=()
-parse_args "$@"
-install_dependencies
-show_banner
-
-info "Recherche de l'anime: ${BOLD}${ANIME_NAME}${NC}"
-episodes_list=()
-mapfile -t episodes_list < <(extract_episodes "$ANIME_NAME")
-
-if [ ${#episodes_list[@]} -eq 0 ]; then
-    error "Aucun épisode trouvé pour '$ANIME_NAME'."
-    exit 1
-fi
-
-selected_episode=""
-
-if [ -n "$EPISODE_NUM" ]; then
-    debug_log "Recherche épisode numéro $EPISODE_NUM"
-    # Recherche épisode exact
-    for ep in "${episodes_list[@]}"; do
-        ep_title="${ep%%|*}"
-        ep_url="${ep#*|}"
-        ep_num=$(extract_episode_number "$ep_title")
-        if [ "$ep_num" = "$EPISODE_NUM" ]; then
-            selected_episode="$ep"
-            break
-        fi
-    done
+    
+    if [ -z "$selection" ]; then
+        error "Sélection invalide"
+        return 1
+    fi
+    
+    local selected_episode=$(echo "$all_episodes" | sed -n "${selection}p")
+    
     if [ -z "$selected_episode" ]; then
-        warning "Épisode $EPISODE_NUM non trouvé. Veuillez sélectionner manuellement."
+        error "Épisode $selection non trouvé"
+        return 1
     fi
-fi
+    
+    info "\nRécupération du lien de l'épisode..."
+    
+    page=1
+    local episode_url=""
+    while [ -z "$episode_url" ] && [ "$page" -le 5 ]; do
+        local search_url="${BASE_URL}/search.php?keywords=${encoded_name}&page=${page}"
+        local page_content=$(curl -s -A "$USER_AGENT" "$search_url")
+        episode_url=$(extract_page_urls "$page_content" "$(echo "$selected_episode" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')")
+        ((page++))
+    done
+    
+    if [ -z "$episode_url" ]; then
+        error "Impossible de trouver l'URL de l'épisode"
+        return 1
+    fi
+    
+    episode_url=$(echo "$episode_url" | sed 's/^\/\///')
+    if [[ "$episode_url" == "http"* ]]; then
+        full_url="$episode_url"
+    elif [[ "$episode_url" == /* ]]; then
+        full_url="${BASE_URL}${episode_url}"
+    else
+        full_url="${BASE_URL}/${episode_url}"
+    fi
+    
+    local embed_url=$(get_embed_url "$full_url")
+    if [ $? -eq 0 ]; then
+        success "Récupération du flux vidéo..."
+        debug_log "URL d'embed: $embed_url"
+        
+        local video_info=$(get_video_url "$embed_url")
+        if [ $? -ne 0 ] || [ -z "$video_info" ]; then
+            error "Impossible d'extraire l'URL de la vidéo"
+            return 1
+        fi
+        
+        local video_url=$(echo "$video_info" | cut -d'|' -f1)
+        local iframe_url=$(echo "$video_info" | cut -d'|' -f2)
+        local video_type=$(echo "$video_info" | cut -d'|' -f3)
+        
+        debug_log "URL de la vidéo extraite: $video_url"
+        debug_log "URL de l'iframe: $iframe_url"
+        debug_log "Type de vidéo: $video_type"
+        
+        local filename="episode_$(date +%Y%m%d_%H%M%S).mp4"
+        if [ "$video_type" = "sibnet" ]; then
+            if download_sibnet_video "$video_url" "$filename" "$iframe_url"; then
+                return 0
+            else
+                return 1
+            fi
+        else
+            if download_uqload_video "$video_url" "$filename" "$iframe_url"; then
+                return 0
+            else
+                return 1
+            fi
+        fi
+    else
+        error "Impossible d'obtenir le lecteur vidéo"
+        info "URL de la page: $full_url"
+    fi
+}
 
-if [ -z "$selected_episode" ]; then
-    selected_episode=$(select_episode "${episodes_list[@]}")
-fi
+cleanup() {
+    local temp_files=("debug_embed.html" "debug_iframe.html")
+    local mp4_files=("episode_"*.mp4)
+    
+    info "Nettoyage des fichiers temporaires..."
+    
+    for file in "${temp_files[@]}"; do
+        if [ -f "$file" ]; then
+            rm -f "$file"
+            debug_log "Suppression de $file"
+        fi
+    done
+    
+    for file in "${mp4_files[@]}"; do
+        if [ -f "$file" ]; then
+            rm -f "$file"
+            debug_log "Suppression de $file"
+        fi
+    done
+    
+    echo
+    center_text "${GREEN}Au revoir!${NC}"
+    exit 0
+}
 
-episode_title="${selected_episode%%|*}"
-episode_url="${selected_episode#*|}"
+trap cleanup EXIT INT TERM HUP
 
-success "Épisode sélectionné : $episode_title"
-info "URL : $episode_url"
+# Gestion principale
+main() {
+    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        show_banner
+        show_help
+        exit 0
+    elif [ "$1" = "-v" ] || [ "$1" = "--version" ]; then
+        echo -e "${CYAN}Iris-CLI v${VERSION}${NC}"
+        exit 0
+    elif [ "$1" = "-d" ] || [ "$1" = "--debug" ]; then
+        shift
+        DEBUG=true
+        show_banner
+        if ! check_permissions; then
+            exit 1
+        fi
+        check_dependencies
+        if [ $# -eq 0 ]; then
+            echo -e "${YELLOW}Entrez le nom de l'anime à rechercher:${NC}"
+            read -r anime_name
+            extract_episodes "$anime_name"
+        elif [ $# -eq 1 ]; then
+            extract_episodes "$1"
+        else
+            extract_episodes "$1" "$2"
+        fi
+    else
+        DEBUG=false
+        show_banner
+        if ! check_permissions; then
+            exit 1
+        fi
+        check_dependencies
+        if [ $# -eq 0 ]; then
+            echo -e "${YELLOW}Entrez le nom de l'anime à rechercher:${NC}"
+            read -r anime_name
+            extract_episodes "$anime_name"
+        elif [ $# -eq 1 ]; then
+            extract_episodes "$1"
+        else
+            extract_episodes "$1" "$2"
+        fi
+    fi
+}
 
-embed_url=$(get_embed_url "$episode_url") || exit 1
-read -r host video_iframe_url < <(get_video_url "$embed_url" | tr '|' ' ') || exit 1
-
-TMP_VIDEO="/tmp/iriscli_video_$(date +%s).mp4"
-
-case "$host" in
-    uqload)
-        info "Téléchargement depuis Uqload..."
-        download_uqload "$video_iframe_url" "$TMP_VIDEO" || { error "Échec téléchargement."; exit 1; }
-        ;;
-    sibnet)
-        info "Téléchargement depuis Sibnet..."
-        download_sibnet "$video_iframe_url" "$TMP_VIDEO" || { error "Échec téléchargement."; exit 1; }
-        ;;
-    *)
-        error "Hébergeur non supporté : $host"
-        exit 1
-        ;;
-esac
-
-play_video "$TMP_VIDEO"
+# Lancement du programme
+main "$@"
